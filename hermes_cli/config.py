@@ -999,6 +999,13 @@ DEFAULT_CONFIG = {
         # External hub installs (trusted/community sources) are always
         # scanned regardless of this setting.
         "guard_agent_created": False,
+        # Detect skill file changes on disk and automatically refresh the
+        # skills system prompt during an active session.  When enabled,
+        # Hermes checks ~/.hermes/skills/ (and external_dirs) for mtime/size
+        # changes before each turn and rebuilds the skills index if needed.
+        "auto_reload": False,
+        # Minimum seconds between auto-reload polls (throttles rapid edits).
+        "auto_reload_interval": 30,
     },
 
     # Curator — background skill maintenance.
