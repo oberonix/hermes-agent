@@ -105,7 +105,7 @@ async def test_reload_skills_handler_queues_note_on_diff(monkeypatch):
     }
 
     import agent.skill_commands as skill_commands_mod
-    monkeypatch.setattr(skill_commands_mod, "reload_skills", lambda: fake_result)
+    monkeypatch.setattr(skill_commands_mod, "reload_skills", lambda *, clear_cache=False, **_: fake_result)
 
     runner = _make_runner()
     event = _make_event("/reload-skills")
@@ -146,7 +146,7 @@ async def test_reload_skills_handler_reports_no_changes(monkeypatch):
     monkeypatch.setattr(
         skill_commands_mod,
         "reload_skills",
-        lambda: {
+        lambda *, clear_cache=False, **_: {
             "added": [],
             "removed": [],
             "unchanged": ["alpha"],

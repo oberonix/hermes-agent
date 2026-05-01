@@ -71,10 +71,11 @@ class TestReloadSkillsHelper:
         from agent.skill_commands import reload_skills
 
         result = reload_skills()
-        assert set(result) == {"added", "removed", "unchanged", "total", "commands"}
+        assert set(result) == {"added", "removed", "unchanged", "total", "commands", "cache_cleared"}
         assert result["total"] == 0
         assert result["added"] == []
         assert result["removed"] == []
+        assert result["cache_cleared"] is False
 
     def test_detects_newly_added_skill_with_description(self, hermes_home):
         from agent.skill_commands import reload_skills, get_skill_commands
