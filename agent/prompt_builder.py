@@ -575,6 +575,60 @@ def clear_skills_system_prompt_cache(*, clear_snapshot: bool = False) -> None:
             logger.debug("Could not remove skills prompt snapshot: %s", e)
 
 
+# ── Auto-reload: track the last seen manifest so we can detect changes ──
+_last_skills_manifest: dict[str, list[int]] | None = None
+
+
+def check_skills_changed() -> bool:
+    """Return True if any skill file on disk differs from the last seen manifest.
+
+    Compares the current mtime/size manifest of all SKILL.md and DESCRIPTION.md
+    files across the local skills dir and external_dirs against a module-level
+    snapshot.  The first call always returns True so the snapshot is seeded.
+    """
+    global _last_skills_manifest
+    skills_dir = get_skills_dir()
+    external_dirs = get_all_skills_dirs()[1:]
+
+    current: dict[str, list[int]] = {}
+    for scan_dir in [skills_dir] + list(external_dirs):
+        if not scan_dir.exists():
+            continue
+        for filename in ("SKILL.md", "DESCRIPTION.md"):
+            for path in iter_skill_index_files(scan_dir, filename):
+                try:
+                    st = path.stat()
+                except OSError:
+                    continue
+                try:
+                    key = str(path.relative_to(scan_dir))
+                except ValueError:
+                    key = str(path)
+                current[key] = [st.st_mtime_ns, st.st_size]
+
+    if _last_skills_manifest is None:
+        _last_skills_manifest = current
+        return True  # First call — nothing to compare, signal "needs build"
+
+    changed = current != _last_skills_manifest
+    if changed:
+        _last_skills_manifest = current
+    return changed
+
+
+def refresh_skills_cache(*, clear_snapshot: bool = True) -> None:
+    """Invalidate both layers of the skills prompt cache.
+
+    Call this after a skill is installed, edited, or removed so the next
+    system prompt rebuild starts from a clean state.
+    """
+    global _last_skills_manifest
+    logger.debug("Refreshing skills prompt cache")
+    clear_skills_system_prompt_cache(clear_snapshot=clear_snapshot)
+    _last_skills_manifest = None
+
+
+
 def _build_skills_manifest(skills_dir: Path) -> dict[str, list[int]]:
     """Build an mtime/size manifest of all SKILL.md and DESCRIPTION.md files."""
     manifest: dict[str, list[int]] = {}
