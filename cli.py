@@ -6488,8 +6488,9 @@ class HermesCLI:
             # without this confirmation.
             self._confirm_and_reload_mcp(cmd_original)
         elif canonical == "reload-skills":
+            _clear_cache = "--clear-cache" in (cmd_original or "")
             with self._busy_command(self._slow_command_status(cmd_original)):
-                self._reload_skills()
+                self._reload_skills(clear_cache=_clear_cache)
         elif canonical == "browser":
             self._handle_browser_command(cmd_original)
         elif canonical == "plugins":
@@ -7953,29 +7954,31 @@ class HermesCLI:
         except Exception as e:
             print(f"  ❌ MCP reload failed: {e}")
 
-    def _reload_skills(self) -> None:
-        """Reload skills: rescan ~/.hermes/skills/ and queue a note for the
-        next user turn.
+    def _reload_skills(self, clear_cache: bool = False) -> None:
+        """Reload skills: rescan ~/.hermes/skills/ and optionally clear
+        the skills system-prompt cache.
 
-        Skills don't need to live in the system prompt for the model to use
-        them (they're invoked via ``/skill-name``, ``skills_list``, or
-        ``skill_view`` at runtime), so this does NOT clear the prompt cache.
-        It rescans the slash-command map, prints the diff for the user, and
-        — if any skills were added or removed — queues a one-shot note that
-        gets prepended to the next user message. This preserves message
-        alternation (no phantom user turn injected out of band) and keeps
-        prompt caching intact.
+        By default this does NOT clear the prompt cache, preserving prefix
+        caching.  Pass ``clear_cache=True`` (or ``--clear-cache`` from the
+        user) to also invalidate the skills prompt cache so the new skills
+        appear in the system prompt immediately.
         """
         try:
             from agent.skill_commands import reload_skills
+            from agent.prompt_builder import refresh_skills_cache
 
             if not self._command_running:
                 print("🔄 Reloading skills...")
 
             result = reload_skills()
-            added = result.get("added", [])      # [{"name", "description"}, ...]
-            removed = result.get("removed", [])  # [{"name", "description"}, ...]
+            added = result.get("added", [])
+            removed = result.get("removed", [])
             total = result.get("total", 0)
+
+            if clear_cache:
+                refresh_skills_cache()
+                if not self._command_running:
+                    print("  🧹 Skills prompt cache cleared.")
 
             if not added and not removed:
                 print("  No new skills detected.")
@@ -7997,19 +8000,14 @@ class HermesCLI:
                     print(f"  {_fmt_line(item)}")
             print(f"  📚 {total} skill(s) available")
 
-            # Queue a one-shot note for the NEXT user turn. The CLI's agent
-            # loop prepends ``_pending_skills_reload_note`` (if set) to the
-            # API-call-local message at ~L8770, then clears it — same
-            # pattern as ``_pending_model_switch_note``. Nothing is written
-            # to conversation_history here, so message alternation stays
-            # intact and no out-of-band user turn is persisted.
-            #
-            # Format matches how the system prompt renders pre-existing
-            # skills (``    - name: description``) so the model reads the
-            # diff in the same shape as its original skill catalog.
+            # Queue a one-shot note for the NEXT user turn.
             sections = ["[USER INITIATED SKILLS RELOAD:"]
+            if clear_cache:
+                sections.append("  Prompt cache cleared — the updated skills catalog will appear in the next system prompt.]")
+            else:
+                sections.append("  (System prompt cache retained — use --clear-cache to refresh it immediately.)]")
+            sections.append("")
             if added:
-                sections.append("")
                 sections.append("Added Skills:")
                 for item in added:
                     sections.append(_fmt_line(item))
