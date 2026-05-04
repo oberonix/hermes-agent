@@ -601,14 +601,15 @@ def check_skills_changed() -> bool:
                 except OSError:
                     continue
                 try:
-                    key = str(path.relative_to(scan_dir))
+                    rel = str(path.relative_to(scan_dir))
                 except ValueError:
-                    key = str(path)
+                    rel = str(path)
+                key = f"{scan_dir}:{rel}"
                 current[key] = [st.st_mtime_ns, st.st_size]
 
     if _last_skills_manifest is None:
         _last_skills_manifest = current
-        return True  # First call — nothing to compare, signal "needs build"
+        return False  # First call — seed snapshot, no changes yet
 
     changed = current != _last_skills_manifest
     if changed:

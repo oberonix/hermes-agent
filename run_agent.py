@@ -4924,9 +4924,6 @@ class AIAgent:
             except Exception:
                 pass
 
-        # Check for new/removed skills (auto-reload)
-        self._check_and_refresh_skills()
-
         has_skills_tools = any(name in self.valid_tool_names for name in ['skills_list', 'skill_view', 'skill_manage'])
         if has_skills_tools:
             avail_toolsets = {
@@ -5371,11 +5368,13 @@ class AIAgent:
         from agent.prompt_builder import check_skills_changed
         try:
             if check_skills_changed():
+                from agent.prompt_builder import refresh_skills_cache
+                refresh_skills_cache()
                 self._invalidate_system_prompt()
                 logger.info("Skills changed on disk — system prompt cache cleared (auto_reload).")
         except Exception:
             # Never let disk-polling break a user turn
-            pass
+            logger.debug("Auto-reload skills check failed (suppressed)")
 
     @staticmethod
     def _deterministic_call_id(fn_name: str, arguments: str, index: int = 0) -> str:
@@ -10529,6 +10528,11 @@ class AIAgent:
         # from disk that the model already knows about (it wrote them!),
         # producing a different system prompt and breaking the Anthropic
         # prefix cache.
+        # ── Auto-reload skills BEFORE the cached-system-prompt short-circuit ──
+        # This MUST run on every turn (even when _cached_system_prompt is warm)
+        # so skills changes are always detected and the prompt cache invalidated.
+        self._check_and_refresh_skills()
+
         if self._cached_system_prompt is None:
             stored_prompt = None
             if conversation_history and self._session_db:
