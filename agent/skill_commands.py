@@ -284,18 +284,24 @@ def get_skill_commands() -> Dict[str, Dict[str, Any]]:
     return _skill_commands
 
 
-def reload_skills() -> Dict[str, Any]:
+def reload_skills(*, clear_cache: bool = False) -> Dict[str, Any]:
     """Re-scan the skills directory and return a diff of what changed.
 
     Rescans ``~/.hermes/skills/`` and any ``skills.external_dirs`` so the
     slash-command map (``agent.skill_commands._skill_commands``) reflects
     skills added or removed on disk.
 
-    This does NOT invalidate the skills system-prompt cache. Skills are
-    called by name via ``/skill-name``, ``skills_list``, or ``skill_view``
-    — they don't need to be in the system prompt for the model to use them.
-    Keeping the prompt cache intact preserves prefix caching across the
-    reload, so a user invoking ``/reload-skills`` pays no cache-reset cost.
+    This does NOT invalidate the skills system-prompt cache *unless*
+    ``clear_cache=True``. Skills are called by name via ``/skill-name``,
+    ``skills_list``, or ``skill_view`` — they don't need to be in the system
+    prompt for the model to use them.  Keeping the prompt cache intact
+    preserves prefix caching across the reload, so a user invoking
+    ``/reload-skills`` pays no cache-reset cost.  Use ``--clear-cache`` to
+    force a full rebuild on the next turn.
+
+    Args:
+        clear_cache: When ``True``, also drop the skills prompt cache so
+                     the next rebuild uses the freshly rescanned skills list.
 
     Returns:
         Dict with keys::
@@ -340,12 +346,17 @@ def reload_skills() -> Dict[str, Any]:
     # (the skill file is gone so we can't re-read it).
     removed = [{"name": n, "description": before[n]} for n in removed_names]
 
+    if clear_cache:
+        from agent.prompt_builder import clear_skills_system_prompt_cache
+        clear_skills_system_prompt_cache()
+
     return {
         "added": added,
         "removed": removed,
         "unchanged": unchanged,
         "total": len(after),
         "commands": len(new_commands),
+        "cache_cleared": clear_cache,
     }
 
 

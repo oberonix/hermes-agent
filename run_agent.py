@@ -1774,9 +1774,16 @@ class AIAgent:
 
         # Skills config: nudge interval for skill creation reminders
         self._skill_nudge_interval = 10
+        self._skills_auto_reload = False
+        self._skills_auto_reload_interval = 30
+        self._last_auto_reload_check: float = 0.0
         try:
             skills_config = _agent_cfg.get("skills", {})
             self._skill_nudge_interval = int(skills_config.get("creation_nudge_interval", 10))
+            self._skills_auto_reload = bool(skills_config.get("auto_reload", False))
+            self._skills_auto_reload_interval = int(skills_config.get("auto_reload_interval", 30))
+            if self._skills_auto_reload_interval < 1:
+                self._skills_auto_reload_interval = 1
         except Exception:
             pass
 
@@ -5343,6 +5350,31 @@ class AIAgent:
         self._cached_system_prompt = None
         if self._memory_store:
             self._memory_store.load_from_disk()
+
+    def _check_and_refresh_skills(self) -> None:
+        """Auto-reload helper: check if skills changed on disk and invalidate the
+        system prompt cache when they have.
+
+        This is a lightweight call (fast-enough to run on every turn) that
+        only does disk-work if ``skills.auto_reload`` is enabled and the
+        configured interval has elapsed.
+        """
+        if not getattr(self, "_skills_auto_reload", False):
+            return
+        now = time.time()
+        if now - self._last_auto_reload_check < self._skills_auto_reload_interval:
+            return
+        self._last_auto_reload_check = now
+        from agent.prompt_builder import check_skills_changed
+        try:
+            if check_skills_changed():
+                from agent.prompt_builder import refresh_skills_cache
+                refresh_skills_cache()
+                self._invalidate_system_prompt()
+                logger.info("Skills changed on disk — system prompt cache cleared (auto_reload).")
+        except Exception:
+            # Never let disk-polling break a user turn
+            logger.debug("Auto-reload skills check failed (suppressed)")
 
     @staticmethod
     def _deterministic_call_id(fn_name: str, arguments: str, index: int = 0) -> str:
@@ -10496,6 +10528,11 @@ class AIAgent:
         # from disk that the model already knows about (it wrote them!),
         # producing a different system prompt and breaking the Anthropic
         # prefix cache.
+        # ── Auto-reload skills BEFORE the cached-system-prompt short-circuit ──
+        # This MUST run on every turn (even when _cached_system_prompt is warm)
+        # so skills changes are always detected and the prompt cache invalidated.
+        self._check_and_refresh_skills()
+
         if self._cached_system_prompt is None:
             stored_prompt = None
             if conversation_history and self._session_db:

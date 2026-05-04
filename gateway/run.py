@@ -4888,7 +4888,8 @@ class GatewayRunner:
             return await self._handle_reload_mcp_command(event)
 
         if canonical == "reload-skills":
-            return await self._handle_reload_skills_command(event)
+            _clear_cache = "--clear-cache" in event.get_command_args()
+            return await self._handle_reload_skills_command(event, clear_cache=_clear_cache)
 
         if canonical == "approve":
             return await self._handle_approve_command(event)
@@ -9430,13 +9431,14 @@ class GatewayRunner:
             logger.warning("MCP reload failed: %s", e)
             return f"❌ MCP reload failed: {e}"
 
-    async def _handle_reload_skills_command(self, event: MessageEvent) -> str:
+    async def _handle_reload_skills_command(self, event: MessageEvent, clear_cache: bool = False) -> str:
         """Handle /reload-skills — rescan skills dir, queue a note for next turn.
 
         Skills don't need to be in the system prompt for the model to use
         them (they're invoked via ``/skill-name``, ``skills_list``, or
         ``skill_view`` at runtime), so this does NOT clear the prompt cache
-        — prefix caching stays intact.
+        — prefix caching stays intact.  Pass ``clear_cache=True`` to also
+        invalidate the cache.
 
         If any skills were added or removed, a one-shot note is queued on
         ``self._pending_skills_reload_notes[session_key]``. The gateway
@@ -9448,13 +9450,17 @@ class GatewayRunner:
         loop = asyncio.get_running_loop()
         try:
             from agent.skill_commands import reload_skills
+            from agent.prompt_builder import refresh_skills_cache
 
-            result = await loop.run_in_executor(None, reload_skills)
-            added = result.get("added", [])      # [{"name", "description"}, ...]
-            removed = result.get("removed", [])  # [{"name", "description"}, ...]
+            result = await loop.run_in_executor(None, lambda: reload_skills(clear_cache=clear_cache))
+            added = result.get("added", [])
+            removed = result.get("removed", [])
             total = result.get("total", 0)
 
-            lines = ["🔄 **Skills Reloaded**\n"]
+            lines = ["🔄 **Skills Reloaded**"]
+            if clear_cache:
+                lines.append("(prompt cache cleared)")
+            lines.append("")
             if not added and not removed:
                 lines.append("No new skills detected.")
                 lines.append(f"\n📚 {total} skill(s) available")
@@ -9480,8 +9486,12 @@ class GatewayRunner:
             # skills (``    - name: description``) so the model reads the
             # diff in the same shape as its original skill catalog.
             sections = ["[USER INITIATED SKILLS RELOAD:"]
+            if clear_cache:
+                sections.append("  Prompt cache cleared — the updated skills catalog will appear in the next system prompt.]")
+            else:
+                sections.append("  (System prompt cache retained — use --clear-cache to refresh it immediately.)]")
+            sections.append("")
             if added:
-                sections.append("")
                 sections.append("Added Skills:")
                 for item in added:
                     sections.append(_fmt_line(item))
